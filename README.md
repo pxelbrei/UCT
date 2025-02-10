@@ -6,6 +6,7 @@ It aims to streamline the process of USB device checking, offering quick access 
 <br/><br/>
 The tool is open-source and released under the BSD-3-Clause license.
 <br/><br/>
+Repair and Format Function added.
 <br/><br/>
 <br/><br/>
 <br/><br/>
