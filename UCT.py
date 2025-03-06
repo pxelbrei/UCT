@@ -8,57 +8,92 @@ import time
 import subprocess
 import threading
 import webbrowser
+from queue import Queue, Empty
+
 
 class USBCheckerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("USB Checker (UCT)")
-        self.root.geometry("500x500")  # Kompakteres Fenster
+        self.root.geometry("500x500")
         self.root.resizable(False, False)
-        self.root.configure(bg="darkgray")
-        self.center_window()
+        self.root.configure(bg="#2e2e2e")
+        self.center_window()  # Center the window on the screen
 
         self.selected_drive = tk.StringVar()
+        self.process_queue = Queue()
+        self.check_queue()
 
-        # Titel
-        tk.Label(root, text="USB Checker (UCT)", font=("Arial", 14, "bold"), bg="darkgray", fg="white").pack(pady=5)
+        # Custom style for buttons
+        self.style = ttk.Style()
+        self.style.configure("TButton", padding=5, relief="flat", background="gray", foreground="black", font=("Arial", 10))
+        self.style.map("TButton", background=[("active", "#666")])
 
-        # Laufwerksauswahl
-        self.drive_dropdown = ttk.Combobox(self.root, textvariable=self.selected_drive, state="readonly")
-        self.drive_dropdown.pack(pady=5)
+        # Title
+        title_frame = tk.Frame(root, bg="#2e2e2e")
+        title_frame.pack(pady=5)
+        tk.Label(title_frame, text="USB Checker (UCT)", font=("Arial", 14, "bold"),
+                 bg="#2e2e2e", fg="white").pack()
 
-        # Buttons mit Tooltips
-        self.create_button("Refresh", self.refresh_drives, "Aktualisiert die Liste der verfügbaren USB-Laufwerke.")
-        self.create_button("Analyze", self.analyze_usb, "Analysiert das ausgewählte USB-Laufwerk auf Speicherplatz und Geschwindigkeit.")
+        # Drive selection
+        drive_frame = tk.Frame(root, bg="#2e2e2e")
+        drive_frame.pack(pady=5)
+        self.drive_dropdown = ttk.Combobox(drive_frame, textvariable=self.selected_drive,
+                                           state="readonly", width=30)
+        self.drive_dropdown.pack(side=tk.LEFT, padx=5)
 
-        # Tools-Menü
-        tools_menu = ttk.Menubutton(self.root, text="Tools", direction="below")
-        menu = tk.Menu(tools_menu, tearoff=0)
+        # Buttons
+        button_frame = tk.Frame(root, bg="#2e2e2e")
+        button_frame.pack(pady=5)
+        self.create_button(button_frame, "Refresh", self.refresh_drives,
+                           "Aktualisiert die Liste der verfügbaren USB-Laufwerke")
+        self.create_button(button_frame, "Analyze", self.analyze_usb,
+                           "Analysiert das ausgewählte USB-Laufwerk auf Speicherplatz und Geschwindigkeit")
+
+        # Tools menu
+        tools_menu = ttk.Menubutton(button_frame, text="Tools", style="TButton")
+        menu = tk.Menu(tools_menu, tearoff=0, bg="#444", fg="white")
         tools_menu.configure(menu=menu)
         menu.add_command(label="Repair USB", command=self.run_repair_in_thread)
         menu.add_command(label="Format USB", command=self.run_format_in_thread)
-        tools_menu.pack(pady=3)
+        tools_menu.pack(side=tk.LEFT, padx=5)
 
-        # Ausgabefenster (kleiner)
-        self.result_display = ScrolledText(self.root, height=10, bg="#1e1e1e", fg="lime", font=("Courier", 9), state="disabled", wrap=tk.WORD)
-        self.result_display.pack(pady=5, fill="both", expand=True)
+        # Output window
+        self.result_display = ScrolledText(root, height=10, bg="#1e1e1e", fg="lime",
+                                           font=("Consolas", 9), state="disabled", wrap=tk.WORD)
+        self.result_display.pack(pady=5, padx=10, fill="both", expand=True)
         self.result_display.tag_configure("center", justify="center")
 
-        # GitHub-Link
-        github_link = tk.Label(self.root, text="Visit UCT on GitHub", fg="blue", cursor="hand2", bg="darkgray")
-        github_link.pack(pady=5)
+        # GitHub link
+        github_frame = tk.Frame(root, bg="#2e2e2e")
+        github_frame.pack(pady=5)
+        github_link = tk.Label(github_frame, text="Visit UCT on GitHub", fg="#4af",
+                               cursor="hand2", bg="#2e2e2e")
+        github_link.pack()
         github_link.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/pxelbrei/UCT"))
 
-        # Laufwerke aktualisieren
+        # Initial drive refresh
         self.refresh_drives()
 
-    def create_button(self, text, command, tooltip_text):
-        button = tk.Button(self.root, text=text, command=command, bg="gray", fg="white")
-        button.pack(pady=3)
+    def center_window(self):
+        """Center the window on the screen."""
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def create_button(self, parent, text, command, tooltip_text):
+        """Create a styled button with a tooltip."""
+        button = ttk.Button(parent, text=text, command=command, style="TButton")
+        button.pack(side=tk.LEFT, padx=5)
         self.create_tooltip(button, tooltip_text)
 
     def create_tooltip(self, widget, text):
-        tooltip = tk.Label(self.root, text=text, bg="yellow", fg="black", relief="solid", borderwidth=1)
+        """Create a tooltip for a widget."""
+        tooltip = tk.Label(self.root, text=text, bg="#ffeb3b", fg="black",
+                           relief="solid", borderwidth=1, font=("Arial", 8))
         tooltip.pack_forget()
 
         def enter(event):
@@ -70,68 +105,45 @@ class USBCheckerApp:
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
 
-    def center_window(self):
-        self.root.update_idletasks()
-        width = self.root.winfo_width()
-        height = self.root.winfo_height()
-        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.root.winfo_screenheight() // 2) - (height // 2)
-        self.root.geometry(f"{width}x{height}+{x}+{y}")
+    def check_queue(self):
+        """Check the process queue for updates."""
+        try:
+            while True:
+                message = self.process_queue.get_nowait()
+                self.update_result_display(message)
+        except Empty:
+            pass
+        self.root.after(100, self.check_queue)
 
     def refresh_drives(self):
+        """Refresh the list of available USB drives."""
         drives = [disk.device for disk in psutil.disk_partitions() if "removable" in disk.opts]
         self.drive_dropdown["values"] = drives
         if drives:
             self.drive_dropdown.set(drives[0])
         else:
             self.drive_dropdown.set("")
+            self.process_queue.put("No USB drives found.\n")
 
     def analyze_usb(self):
-        drive = self.validate_drive()
-        if not drive:
+        """Analyze the selected USB drive."""
+        selected_drive = self.selected_drive.get()
+        if not selected_drive:
+            self.process_queue.put("No drive selected.\n")
             return
 
-        self.result_display.config(state="normal")
-        self.result_display.delete("1.0", tk.END)
-
         try:
-            total, used, free = shutil.disk_usage(drive)
-            self.result_display.insert(tk.END, f"Drive: {drive}\n", "center")
-            self.result_display.insert(tk.END, f"Total: {self.format_size(total)}\n", "center")
-            self.result_display.insert(tk.END, f"Used: {self.format_size(used)}\n", "center")
-            self.result_display.insert(tk.END, f"Free: {self.format_size(free)}\n", "center")
-            read_speed, write_speed = self.speed_test(drive)
-            self.result_display.insert(tk.END, f"Read: {read_speed:.2f} MB/s\n", "center")
-            self.result_display.insert(tk.END, f"Write: {write_speed:.2f} MB/s\n", "center")
-            self.result_display.insert(tk.END, "No errors found.\n", "center")
+            usage = shutil.disk_usage(selected_drive)
+            message = (f"Drive: {selected_drive}\n"
+                       f"Total: {usage.total / (1024**3):.2f} GB\n"
+                       f"Used: {usage.used / (1024**3):.2f} GB\n"
+                       f"Free: {usage.free / (1024**3):.2f} GB\n")
+            self.process_queue.put(message)
         except Exception as e:
-            self.result_display.insert(tk.END, f"Error: {str(e)}\n", "center")
-
-        self.result_display.config(state="disabled")
-
-    def speed_test(self, drive):
-        test_file = os.path.join(drive, "speed_test.tmp")
-        data = os.urandom(1024 * 1024)  # 1 MB zufällige Daten
-
-        try:
-            start_time = time.time()
-            with open(test_file, "wb") as f:
-                f.write(data)
-            write_time = time.time() - start_time
-
-            start_time = time.time()
-            with open(test_file, "rb") as f:
-                f.read()
-            read_time = time.time() - start_time
-
-            write_speed = 1 / write_time
-            read_speed = 1 / read_time
-            return read_speed, write_speed
-        finally:
-            if os.path.exists(test_file):
-                os.remove(test_file)
+            self.process_queue.put(f"Error analyzing drive: {e}\n")
 
     def run_repair_in_thread(self):
+        """Run the USB repair process in a separate thread."""
         drive = self.validate_drive()
         if not drive:
             return
@@ -140,21 +152,23 @@ class USBCheckerApp:
         thread.start()
 
     def repair_usb(self, drive):
+        """Repair the selected USB drive."""
         try:
-            process = subprocess.Popen(["chkdsk", drive, "/f"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            
-            self.result_display.config(state="normal")
-            self.result_display.insert(tk.END, "Repairing USB...\n", "center")
-            self.result_display.config(state="disabled")
-            
-            for line in iter(process.stdout.readline, ""):
-                self.root.after(0, self.update_result_display, line)
+            process = subprocess.Popen(["chkdsk", drive, "/f"], stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, text=True, shell=True,
+                                       creationflags=subprocess.CREATE_NO_WINDOW)
 
-            self.root.after(0, self.update_result_display, "\nRepair completed.\n")
+            self.process_queue.put("Repairing USB...\n")
+
+            for line in iter(process.stdout.readline, ""):
+                self.process_queue.put(line)
+
+            self.process_queue.put("\nRepair completed.\n")
         except Exception as e:
-            self.root.after(0, self.update_result_display, f"Error: {str(e)}\n")
+            self.process_queue.put(f"Error: {str(e)}\n")
 
     def run_format_in_thread(self):
+        """Run the USB format process in a separate thread."""
         drive = self.validate_drive()
         if not drive:
             return
@@ -163,69 +177,66 @@ class USBCheckerApp:
         thread.start()
 
     def format_usb(self, drive):
+        """Format the selected USB drive."""
         try:
-            # Erstellen eines temporären Skripts für diskpart
+            # Create a temporary script for diskpart
             script_path = os.path.join(os.getenv("TEMP"), "format_usb_script.txt")
             with open(script_path, "w") as script_file:
-                script_file.write(f"select volume {drive[0]}\n")  # Laufwerksbuchstabe ohne Doppelpunkt
+                script_file.write(f"select volume {drive[0]}\n")  # Drive letter without colon
                 script_file.write("clean\n")
                 script_file.write("create partition primary\n")
                 script_file.write("format fs=fat32 quick\n")
                 script_file.write("assign\n")
 
-            # Ausführen von diskpart mit dem Skript
+            # Run diskpart with the script
             process = subprocess.Popen(
                 ["diskpart", "/s", script_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 shell=True,
-                creationflags=subprocess.CREATE_NO_WINDOW  # Verhindert das Öffnen eines externen CMD-Fensters
+                creationflags=subprocess.CREATE_NO_WINDOW  # Prevent external CMD window
             )
 
-            self.root.after(0, self.update_result_display, "Formatting USB...\n")
+            self.process_queue.put("Formatting USB...\n")
 
-            # Ausgabe des Prozesses in Echtzeit lesen
+            # Read process output in real-time
             while True:
                 output = process.stdout.readline()
                 if output == "" and process.poll() is not None:
                     break
                 if output:
-                    self.root.after(0, self.update_result_display, output)
+                    self.process_queue.put(output)
 
-            # Überprüfen, ob der Prozess erfolgreich abgeschlossen wurde
+            # Check if the process completed successfully
             return_code = process.poll()
             if return_code == 0:
-                self.root.after(0, self.update_result_display, "\nFormat completed successfully.\n")
+                self.process_queue.put("\nFormat completed successfully.\n")
             else:
-                self.root.after(0, self.update_result_display, f"\nFormat failed with return code {return_code}.\n")
+                self.process_queue.put(f"\nFormat failed with return code {return_code}.\n")
 
         except Exception as e:
-            self.root.after(0, self.update_result_display, f"Error: {str(e)}\n")
+            self.process_queue.put(f"Error: {str(e)}\n")
         finally:
-            # Temporäre Skriptdatei löschen
+            # Delete the temporary script file
             if os.path.exists(script_path):
                 os.remove(script_path)
 
     def update_result_display(self, text):
+        """Update the result display with new text."""
         self.result_display.config(state="normal")
         self.result_display.insert(tk.END, text, "center")
         self.result_display.see(tk.END)
         self.result_display.config(state="disabled")
 
     def validate_drive(self):
+        """Validate the selected drive."""
         drive = self.selected_drive.get()
         if not drive or not os.path.exists(drive):
             messagebox.showwarning("Warning", "Please select a valid USB drive.")
             return None
         return drive
 
-    @staticmethod
-    def format_size(size):
-        for unit in ["B", "KB", "MB", "GB", "TB"]:
-            if size < 1024.0:
-                return f"{size:.2f} {unit}"
-            size /= 1024.0
 
 if __name__ == "__main__":
     root = tk.Tk()
