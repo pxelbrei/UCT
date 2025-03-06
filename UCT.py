@@ -55,7 +55,7 @@ class USBCheckerApp:
         menu = tk.Menu(tools_menu, tearoff=0, bg="#444", fg="white")
         tools_menu.configure(menu=menu)
         menu.add_command(label="Repair USB", command=self.run_repair_in_thread)
-        menu.add_command(label="Format USB", command=self.run_format_in_thread)
+        menu.add_command(label="Format USB", command=self.show_format_dialog)
         tools_menu.pack(side=tk.LEFT, padx=5)
 
         # Output window
@@ -167,17 +167,40 @@ class USBCheckerApp:
         except Exception as e:
             self.process_queue.put(f"Error: {str(e)}\n")
 
-    def run_format_in_thread(self):
-        """Run the USB format process in a separate thread."""
+    def show_format_dialog(self):
+        """Show a dialog to select the filesystem for formatting."""
         drive = self.validate_drive()
         if not drive:
             return
 
-        thread = threading.Thread(target=self.format_usb, args=(drive,))
+        # Create a new dialog window
+        format_dialog = tk.Toplevel(self.root)
+        format_dialog.title("Select Filesystem")
+        format_dialog.geometry("300x150")
+        format_dialog.resizable(False, False)
+        format_dialog.configure(bg="#2e2e2e")
+
+        # Label
+        tk.Label(format_dialog, text="Select filesystem:", bg="#2e2e2e", fg="white").pack(pady=10)
+
+        # Filesystem selection
+        filesystem_var = tk.StringVar(value="FAT32")  # Default selection
+        filesystems = ["FAT", "FAT32", "NTFS", "exFAT"]
+        for fs in filesystems:
+            tk.Radiobutton(format_dialog, text=fs, variable=filesystem_var, value=fs,
+                           bg="#2e2e2e", fg="white", selectcolor="#444").pack(anchor="w", padx=20)
+
+        # Format button
+        tk.Button(format_dialog, text="Format", command=lambda: self.run_format_in_thread(drive, filesystem_var.get()),
+                  bg="gray", fg="black").pack(pady=10)
+
+    def run_format_in_thread(self, drive, filesystem):
+        """Run the USB format process in a separate thread."""
+        thread = threading.Thread(target=self.format_usb, args=(drive, filesystem))
         thread.start()
 
-    def format_usb(self, drive):
-        """Format the selected USB drive."""
+    def format_usb(self, drive, filesystem):
+        """Format the selected USB drive with the specified filesystem."""
         try:
             # Create a temporary script for diskpart
             script_path = os.path.join(os.getenv("TEMP"), "format_usb_script.txt")
@@ -185,7 +208,7 @@ class USBCheckerApp:
                 script_file.write(f"select volume {drive[0]}\n")  # Drive letter without colon
                 script_file.write("clean\n")
                 script_file.write("create partition primary\n")
-                script_file.write("format fs=fat32 quick\n")
+                script_file.write(f"format fs={filesystem} quick\n")
                 script_file.write("assign\n")
 
             # Run diskpart with the script
@@ -198,7 +221,7 @@ class USBCheckerApp:
                 creationflags=subprocess.CREATE_NO_WINDOW  # Prevent external CMD window
             )
 
-            self.process_queue.put("Formatting USB...\n")
+            self.process_queue.put(f"Formatting USB with {filesystem}...\n")
 
             # Read process output in real-time
             while True:
