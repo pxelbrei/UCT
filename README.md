@@ -8,6 +8,7 @@ The tool is open-source and released under the BSD-3-Clause license.
 <br/><br/>
 Repair and Format Function added.
 <br/><br/>
+<img src="https://storage.ko-fi.com/cdn/useruploads/display/7229eda7-abcc-4c94-9691-370457a6b34c_python3.12_8tugxuvxyf.png" width="200" height="200"/>
 <br/><br/>
 <br/><br/>
 <br/><br/>
