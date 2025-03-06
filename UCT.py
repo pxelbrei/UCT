@@ -18,15 +18,15 @@ class USBCheckerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("USB Checker (UCT)")
-        self.root.geometry("600x500")  # Smaller window height
-        self.root.resizable(False, False)
+        self.root.geometry("600x500")  # Fixed window size
+        self.root.resizable(False, False)  # Window not resizable
         self.root.configure(bg="#2e2e2e")
         self.center_window(self.root)
 
         self.selected_drive = tk.StringVar()
         self.process_queue = Queue()
         self.check_queue()
-        self.is_running = False  # To prevent multiple operations at once
+        self.is_running = False
 
         # Setup logging
         self.setup_logging()
@@ -73,7 +73,7 @@ class USBCheckerApp:
         self.result_display.pack(pady=5, padx=10, fill="both", expand=True)
         self.result_display.tag_configure("center", justify="center")
 
-        # Progress bar
+        # Progress bar (animated)
         self.progress = ttk.Progressbar(root, orient="horizontal", length=500, mode="determinate")
         self.progress.pack(pady=5)
 
@@ -154,10 +154,21 @@ class USBCheckerApp:
 
         try:
             usage = shutil.disk_usage(selected_drive)
-            message = (f"Drive: {selected_drive}\n"
-                       f"Total: {usage.total / (1024**3):.2f} GB\n"
-                       f"Used: {usage.used / (1024**3):.2f} GB\n"
-                       f"Free: {usage.free / (1024**3):.2f} GB\n")
+            partitions = psutil.disk_partitions()
+            drive_info = next((p for p in partitions if p.device == selected_drive), None)
+
+            if drive_info:
+                message = (f"Drive: {selected_drive}\n"
+                           f"File System: {drive_info.fstype}\n"
+                           f"Total: {usage.total / (1024**3):.2f} GB\n"
+                           f"Used: {usage.used / (1024**3):.2f} GB\n"
+                           f"Free: {usage.free / (1024**3):.2f} GB\n")
+            else:
+                message = (f"Drive: {selected_drive}\n"
+                           f"Total: {usage.total / (1024**3):.2f} GB\n"
+                           f"Used: {usage.used / (1024**3):.2f} GB\n"
+                           f"Free: {usage.free / (1024**3):.2f} GB\n")
+
             self.process_queue.put(message)
             logging.info(f"Analyzed drive: {selected_drive}")
         except Exception as e:
