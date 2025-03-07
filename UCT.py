@@ -47,13 +47,17 @@ class USBCheckerApp:
         drive_frame = tk.Frame(root, bg="#2e2e2e")
         drive_frame.pack(pady=5)
         self.drive_dropdown = ttk.Combobox(drive_frame, textvariable=self.selected_drive,
-                                           state="readonly", width=20)
+                                           state="readonly", width=25)  # Adjusted width
         self.drive_dropdown.pack(side=tk.LEFT, padx=5)
 
         # Refresh button
         refresh_button = ttk.Button(drive_frame, text="Refresh", command=self.refresh_drives, style="TButton")
         refresh_button.pack(side=tk.LEFT, padx=5)
         self.create_tooltip(refresh_button, "Refresh the list of available USB drives")
+
+        # Open Log File Button (next to the Refresh button)
+        open_log_button = ttk.Button(drive_frame, text="Open Log File", command=self.open_log_file, style="TButton")
+        open_log_button.pack(side=tk.LEFT, padx=5)
 
         # Buttons (square and flat, placed side by side)
         button_frame = tk.Frame(root, bg="#2e2e2e")
@@ -74,7 +78,7 @@ class USBCheckerApp:
         self.result_display.tag_configure("center", justify="center")
 
         # Progress bar (animated)
-        self.progress = ttk.Progressbar(root, orient="horizontal", length=500, mode="determinate")
+        self.progress = ttk.Progressbar(root, orient="horizontal", length=300, mode="determinate")
         self.progress.pack(pady=5)
 
         # GitHub link
@@ -89,10 +93,30 @@ class USBCheckerApp:
         self.refresh_drives()
 
     def setup_logging(self):
-        """Set up logging to a file."""
-        logging.basicConfig(filename="usb_checker.log", level=logging.INFO,
+        """Set up logging to a file with a maximum size of 10 MB."""
+        log_file = "usb_checker.log"
+        max_size = 10 * 1024 * 1024  # 10 MB
+
+        # Check if the log file exceeds the maximum size
+        if os.path.exists(log_file) and os.path.getsize(log_file) > max_size:
+            os.remove(log_file)  # Delete the log file if it's too large
+
+        logging.basicConfig(filename=log_file, level=logging.INFO,
                             format="%(asctime)s - %(levelname)s - %(message)s")
         logging.info("USB Checker started.")
+
+    def open_log_file(self):
+        """Open the log file in the default text editor."""
+        log_file = "usb_checker.log"
+        if os.path.exists(log_file):
+            if sys.platform == "win32":
+                os.startfile(log_file)  # Windows
+            elif sys.platform == "darwin":
+                subprocess.run(["open", log_file])  # macOS
+            else:
+                subprocess.run(["xdg-open", log_file])  # Linux
+        else:
+            messagebox.showinfo("Info", "Log file does not exist yet.")
 
     def center_window(self, window):
         """Center the given window on the screen."""
@@ -136,18 +160,102 @@ class USBCheckerApp:
         self.root.after(100, self.check_queue)
 
     def refresh_drives(self):
-        """Refresh the list of available USB drives."""
-        drives = [disk.device for disk in psutil.disk_partitions() if "removable" in disk.opts]
-        self.drive_dropdown["values"] = drives
-        if drives:
-            self.drive_dropdown.set(drives[0])
-        else:
-            self.drive_dropdown.set("")
-            self.process_queue.put("No USB drives found.\n")
+        """Refresh the list of available USB drives with additional information."""
+        try:
+            drives = []
+            for partition in psutil.disk_partitions():
+                # Check if the drive is a USB drive
+                if self.is_usb_drive(partition.device):
+                    drive_letter = partition.device
+                    drive_label = self.get_drive_label(drive_letter)  # Get drive label
+                    drive_info = f"{drive_letter} - {drive_label} ({partition.fstype})"  # Combined description
+                    drives.append((drive_letter, drive_info))  # Store drive letter and description
+
+            # Update dropdown values
+            self.drive_dropdown["values"] = [drive_info for _, drive_info in drives]
+            if drives:
+                self.drive_dropdown.set(drives[0][1])  # Select the first entry
+            else:
+                self.drive_dropdown.set("")
+                self.process_queue.put("No USB drives found.\n")
+        except psutil.Error as e:
+            self.process_queue.put(f"Error refreshing drives: {e}\n")
+            logging.error(f"Error refreshing drives: {e}")
+
+    def is_usb_drive(self, drive_letter):
+        """Check if the drive is a USB drive."""
+        try:
+            # Windows: Check if the drive is removable
+            if sys.platform == "win32":
+                import ctypes
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(drive_letter))
+                return drive_type == 2  # DRIVE_REMOVABLE = 2
+            else:
+                # Linux/macOS: Check if the drive is removable
+                return "removable" in psutil.disk_partitions(all=True)[0].opts
+        except Exception as e:
+            logging.error(f"Error checking if drive is USB: {e}")
+            return False
+
+    def get_drive_label(self, drive_letter):
+        """Get the label of the drive (if available)."""
+        try:
+            # Use `ctypes` to retrieve the drive label (Windows-specific)
+            if sys.platform == "win32":
+                volume_name_buffer = ctypes.create_unicode_buffer(1024)
+                file_system_buffer = ctypes.create_unicode_buffer(1024)
+                ctypes.windll.kernel32.GetVolumeInformationW(
+                    ctypes.c_wchar_p(drive_letter),
+                    volume_name_buffer,
+                    ctypes.sizeof(volume_name_buffer),
+                    None,
+                    None,
+                    None,
+                    file_system_buffer,
+                    ctypes.sizeof(file_system_buffer)
+                )
+                return volume_name_buffer.value.strip() or "No Label"
+            else:
+                # For Linux/macOS: Use `os.statvfs` or similar methods
+                return "No Label"
+        except Exception as e:
+            logging.error(f"Error getting drive label: {e}")
+            return "No Label"
+
+    def extract_drive_letter(self, drive_info):
+        """Extract the drive letter from the combined drive info string."""
+        if drive_info:
+            return drive_info.split(" - ")[0]  # Extract the part before " - "
+        return None
+
+    def validate_drive(self):
+        """Validate the selected drive."""
+        drive_info = self.selected_drive.get()
+        if not drive_info:
+            messagebox.showwarning("Warning", "Please select a valid USB drive.")
+            return None
+
+        # Extract the drive letter from the combined description
+        drive_letter = self.extract_drive_letter(drive_info)
+        if not drive_letter:
+            messagebox.showwarning("Warning", "Invalid drive selection.")
+            return None
+
+        # Check if the drive exists and is accessible
+        if not os.path.exists(drive_letter):
+            messagebox.showwarning("Warning", f"The drive {drive_letter} is not available or does not exist.")
+            return None
+
+        # Check if the drive is a USB drive
+        if not self.is_usb_drive(drive_letter):
+            messagebox.showwarning("Warning", f"The drive {drive_letter} is not a USB drive.")
+            return None
+
+        return drive_letter
 
     def analyze_usb(self):
         """Analyze the selected USB drive."""
-        selected_drive = self.selected_drive.get()
+        selected_drive = self.validate_drive()
         if not selected_drive:
             self.process_queue.put("No drive selected.\n")
             return
@@ -171,9 +279,12 @@ class USBCheckerApp:
 
             self.process_queue.put(message)
             logging.info(f"Analyzed drive: {selected_drive}")
-        except Exception as e:
-            self.process_queue.put(f"Error analyzing drive: {e}\n")
-            logging.error(f"Error analyzing drive: {e}")
+        except OSError as e:
+            self.process_queue.put(f"Error accessing drive: {e}\n")
+            logging.error(f"Error accessing drive: {e}")
+        except shutil.Error as e:
+            self.process_queue.put(f"Error analyzing drive usage: {e}\n")
+            logging.error(f"Error analyzing drive usage: {e}")
 
     def run_repair_in_thread(self):
         """Run the USB repair process in a separate thread."""
@@ -218,9 +329,15 @@ class USBCheckerApp:
             self.process_queue.put("\nRepair completed.\n")
             self.progress["value"] = 100
             logging.info(f"Repaired drive: {drive}")
-        except Exception as e:
-            self.process_queue.put(f"Error: {str(e)}\n")
-            logging.error(f"Error repairing drive: {e}")
+        except subprocess.CalledProcessError as e:
+            self.process_queue.put(f"Error running chkdsk: {e}\n")
+            logging.error(f"Error running chkdsk: {e}")
+        except OSError as e:
+            self.process_queue.put(f"Error accessing drive: {e}\n")
+            logging.error(f"Error accessing drive: {e}")
+        except ctypes.WinError as e:
+            self.process_queue.put(f"Error with administrator privileges: {e}\n")
+            logging.error(f"Error with administrator privileges: {e}")
         finally:
             self.is_running = False
 
@@ -268,9 +385,12 @@ class USBCheckerApp:
             self.process_queue.put(f"Read speed: {read_speed:.2f} MB/s\n")
             self.progress["value"] = 100
             logging.info(f"Benchmarked drive: {drive} - Write: {write_speed:.2f} MB/s, Read: {read_speed:.2f} MB/s")
-        except Exception as e:
-            self.process_queue.put(f"Error: {str(e)}\n")
-            logging.error(f"Error benchmarking drive: {e}")
+        except OSError as e:
+            self.process_queue.put(f"Error accessing drive: {e}\n")
+            logging.error(f"Error accessing drive: {e}")
+        except IOError as e:
+            self.process_queue.put(f"Error during benchmark: {e}\n")
+            logging.error(f"Error during benchmark: {e}")
         finally:
             self.is_running = False
 
@@ -312,9 +432,15 @@ class USBCheckerApp:
             self.process_queue.put("\nBackup completed successfully.\n")
             self.progress["value"] = 100
             logging.info(f"Backed up drive: {drive} to {backup_folder}")
-        except Exception as e:
-            self.process_queue.put(f"Error: {str(e)}\n")
-            logging.error(f"Error backing up drive: {e}")
+        except OSError as e:
+            self.process_queue.put(f"Error accessing drive: {e}\n")
+            logging.error(f"Error accessing drive: {e}")
+        except shutil.Error as e:
+            self.process_queue.put(f"Error copying files: {e}\n")
+            logging.error(f"Error copying files: {e}")
+        except FileNotFoundError as e:
+            self.process_queue.put(f"File not found: {e}\n")
+            logging.error(f"File not found: {e}")
         finally:
             self.is_running = False
 
@@ -324,14 +450,6 @@ class USBCheckerApp:
         self.result_display.insert(tk.END, text, "center")
         self.result_display.see(tk.END)
         self.result_display.config(state="disabled")
-
-    def validate_drive(self):
-        """Validate the selected drive."""
-        drive = self.selected_drive.get()
-        if not drive or not os.path.exists(drive):
-            messagebox.showwarning("Warning", "Please select a valid USB drive.")
-            return None
-        return drive
 
 
 if __name__ == "__main__":
